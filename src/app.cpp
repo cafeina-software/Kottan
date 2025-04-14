@@ -98,6 +98,11 @@ App::MessageReceived(BMessage *msg)
 				node_ref nref;
 				entry.GetNodeRef(&nref);
 				watch_node(&nref, B_WATCH_STAT|B_WATCH_INTERIM_STAT, be_app_messenger);
+
+				// add the file path to set the title with it
+				BPath filePath;
+				entry.GetPath(&filePath);
+				open_reply_msg.AddString("filePath", filePath.Path());
 			}
 			else
 			{
@@ -211,6 +216,18 @@ App::MessageReceived(BMessage *msg)
 			fDataMessage->Flatten(fMessageFile);
 			fMainWindow->PostMessage(MW_WAS_SAVED);
 
+			break;
+		}
+
+		// Close file requested
+		case MW_CLOSE_MESSAGEFILE:
+		{
+			fMessageFile->Unset();
+			fDataMessage->MakeEmpty();
+
+			BMessage reply(MW_CLOSE_REPLY);
+			reply.AddBool("success", true);
+			fMainWindow->PostMessage(&reply);
 			break;
 		}
 

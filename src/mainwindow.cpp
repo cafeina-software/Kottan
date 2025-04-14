@@ -4,6 +4,7 @@
  *
  */
 
+#include "app.h"
 #include "mainwindow.h"
 
 #include <Alert.h>
@@ -21,7 +22,7 @@
 
 MainWindow::MainWindow(BRect geometry)
 	:
-	BWindow(geometry, "Kottan", B_DOCUMENT_WINDOW, B_ASYNCHRONOUS_CONTROLS)
+	BWindow(geometry, kAppName, B_DOCUMENT_WINDOW, B_ASYNCHRONOUS_CONTROLS)
 {
 
 	//initialize GUI objects
@@ -37,9 +38,10 @@ MainWindow::MainWindow(BRect geometry)
 	//define menu layout
 	BLayoutBuilder::Menu<>(fTopMenuBar)
 		.AddMenu(B_TRANSLATE("File"))
-			.AddItem(B_TRANSLATE("Open"), MW_OPEN_MESSAGEFILE, 'O')
+			.AddItem(B_TRANSLATE("Open" B_UTF8_ELLIPSIS), MW_OPEN_MESSAGEFILE, 'O')
 			.AddItem(B_TRANSLATE("Save"), MW_SAVE_MESSAGEFILE, 'S')
 			.AddItem(B_TRANSLATE("Reload"), MW_RELOAD_FROM_FILE, 'R')
+			.AddItem(B_TRANSLATE("Close"), MW_CLOSE_MESSAGEFILE, 'W')
 			.AddSeparator()
 			.AddItem(B_TRANSLATE("Quit"), B_QUIT_REQUESTED, 'Q')
 		.End()
@@ -50,6 +52,7 @@ MainWindow::MainWindow(BRect geometry)
 
 	fTopMenuBar->FindItem(MW_SAVE_MESSAGEFILE)->SetEnabled(false);
 	fTopMenuBar->FindItem(MW_RELOAD_FROM_FILE)->SetEnabled(false);
+	fTopMenuBar->FindItem(MW_CLOSE_MESSAGEFILE)->SetEnabled(false);
 
 	//define main layout
 	BLayoutBuilder::Group<>(this, B_VERTICAL,0)
@@ -83,6 +86,7 @@ MainWindow::MessageReceived(BMessage *msg)
 		);
 	const char *notsaved_alert_cancel = B_TRANSLATE("Cancel");
 	const char *notsaved_alert_continue = B_TRANSLATE("Open file");
+	const char *notsaved_alert_close = B_TRANSLATE("Close file");
 
 	if(msg->WasDropped())
 	{
@@ -140,16 +144,27 @@ MainWindow::MessageReceived(BMessage *msg)
 			break;
 		}
 
+		// Close a currently opened file
+		case MW_CLOSE_MESSAGEFILE:
+		{
+			// Ask for confirmation when there are pending changes
+			if(fUnsaved) {
+				BString saveOrDiscard(B_TRANSLATE("The message data was changed but not saved. "
+				"Do you really want to close the file? Any unsaved changes will be lost."));
+				if(!continue_action(saveOrDiscard, notsaved_alert_cancel,
+				notsaved_alert_close))
+					break;
+			}
+			be_app->PostMessage(msg);
+			break;
+		}
+
 		//message file was supplied via file dialog or drag&drop
 		case MW_REF_MESSAGEFILE:
 		{
 			//get filename from file ref
 			entry_ref ref;
 			msg->FindRef("refs", &ref);
-			BEntry target_file(&ref, true);
-			BPath target_path(&target_file);
-
-			SetTitle(target_path.Path());
 
 			BMessage inspect_message(MW_INSPECTMESSAGEFILE);
 			inspect_message.AddRef("msgfile",&ref);
@@ -174,6 +189,13 @@ MainWindow::MessageReceived(BMessage *msg)
 				BMessage *data_message = static_cast<BMessage*>(data_msg_pointer);
 				fMessageInfoView->SetDataMessage(data_message);
 				fTopMenuBar->FindItem(MW_RELOAD_FROM_FILE)->SetEnabled(true);
+				fTopMenuBar->FindItem(MW_CLOSE_MESSAGEFILE)->SetEnabled(true);
+
+				// Set the window's title with the file path (if it was sent)
+				BString appTitle(kAppName), filePath;
+				if(msg->FindString("filePath", &filePath) == B_OK)
+					appTitle << ": " << filePath;
+				SetTitle(appTitle);
 			}
 			else
 			{
@@ -185,6 +207,27 @@ MainWindow::MessageReceived(BMessage *msg)
 				message_open_alert->Go();
 			}
 
+			break;
+		}
+
+		// Reply after the file was closed
+		case MW_CLOSE_REPLY:
+		{
+			bool success = msg->GetBool("success", false);
+			if(success) {
+				fUnsaved = false;
+
+				// Update controls
+				fMessageInfoView->Clear();
+
+				// Reset title
+				SetTitle(kAppName);
+
+				// Reset menus
+				fTopMenuBar->FindItem(MW_SAVE_MESSAGEFILE)->SetEnabled(false);
+				fTopMenuBar->FindItem(MW_RELOAD_FROM_FILE)->SetEnabled(false);
+				fTopMenuBar->FindItem(MW_CLOSE_MESSAGEFILE)->SetEnabled(false);
+			}
 			break;
 		}
 

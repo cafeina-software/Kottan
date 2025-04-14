@@ -17,6 +17,7 @@
 class DataWindow;
 class MainWindow;
 
+extern const char* kAppName;
 
 class IndexMessage {
 public:
