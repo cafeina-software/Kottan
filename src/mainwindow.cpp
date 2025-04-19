@@ -5,15 +5,22 @@
  */
 
 #include "app.h"
+#include "gettype.h"
+#include "importerwindow.h"
+#include "kottandefs.h"
 #include "mainwindow.h"
+#include "whatwindow.h"
 
 #include <Alert.h>
+#include <FindDirectory.h>
 #include <LayoutBuilder.h>
 #include <Catalog.h>
 #include <Application.h>
-#include <ColumnTypes.h>
+#include <private/interface/ColumnListView.h>
+#include <private/interface/ColumnTypes.h>
 #include <Entry.h>
 #include <Path.h>
+#include <stdio.h>
 
 
 #undef B_TRANSLATION_CONTEXT
@@ -24,43 +31,89 @@ MainWindow::MainWindow(BRect geometry)
 	:
 	BWindow(geometry, kAppName, B_DOCUMENT_WINDOW, B_ASYNCHRONOUS_CONTROLS)
 {
-
 	//initialize GUI objects
 	fTopMenuBar = new BMenuBar("topmenubar");
 	fMessageInfoView = new MessageView();
-	fOpenFilePanel = new BFilePanel(B_OPEN_PANEL,
-									new BMessenger(this),
-									NULL,
-									B_FILE_NODE,
-									false,
-									new BMessage(MW_REF_MESSAGEFILE));
+	fDataView = new DataView();
 
 	//define menu layout
 	BLayoutBuilder::Menu<>(fTopMenuBar)
 		.AddMenu(B_TRANSLATE("File"))
 			.AddItem(B_TRANSLATE("Open" B_UTF8_ELLIPSIS), MW_OPEN_MESSAGEFILE, 'O')
-			.AddItem(B_TRANSLATE("Save"), MW_SAVE_MESSAGEFILE, 'S')
 			.AddItem(B_TRANSLATE("Reload"), MW_RELOAD_FROM_FILE, 'R')
+			.AddSeparator()
+			.AddItem(B_TRANSLATE("Save"), MW_SAVE_MESSAGEFILE, 'S')
+			.AddItem(B_TRANSLATE("Save as" B_UTF8_ELLIPSIS), MW_SAVE_MESSAGEFILE_AS, 'S', B_COMMAND_KEY | B_SHIFT_KEY)
+			.AddSeparator()
 			.AddItem(B_TRANSLATE("Close"), MW_CLOSE_MESSAGEFILE, 'W')
 			.AddSeparator()
 			.AddItem(B_TRANSLATE("Quit"), B_QUIT_REQUESTED, 'Q')
 		.End()
+		.AddMenu(B_TRANSLATE("Edit"))
+			.AddItem(B_TRANSLATE("Add affine transformation" B_UTF8_ELLIPSIS), MW_ADD_AFFINE_TX)
+            .AddItem(B_TRANSLATE("Add alignment" B_UTF8_ELLIPSIS), MW_ADD_ALIGNMENT)
+            .AddItem(B_TRANSLATE("Add boolean" B_UTF8_ELLIPSIS), MW_ADD_BOOL)
+            .AddItem(B_TRANSLATE("Add color" B_UTF8_ELLIPSIS), MW_ADD_COLOR)
+            .AddMenu(B_TRANSLATE("Add integer number"))
+                .AddItem(B_TRANSLATE("Signed integer (8 bits)" B_UTF8_ELLIPSIS), MW_ADD_INT8)
+                .AddItem(B_TRANSLATE("Signed integer (16 bits)" B_UTF8_ELLIPSIS), MW_ADD_INT16)
+                .AddItem(B_TRANSLATE("Signed integer (32 bits)" B_UTF8_ELLIPSIS), MW_ADD_INT32)
+                .AddItem(B_TRANSLATE("Signed integer (64 bits)" B_UTF8_ELLIPSIS), MW_ADD_INT64)
+                .AddSeparator()
+                .AddItem(B_TRANSLATE("Unsigned integer (8 bits)" B_UTF8_ELLIPSIS), MW_ADD_UINT8)
+                .AddItem(B_TRANSLATE("Unsigned integer (16 bits)" B_UTF8_ELLIPSIS), MW_ADD_UINT16)
+                .AddItem(B_TRANSLATE("Unsigned integer (32 bits)" B_UTF8_ELLIPSIS), MW_ADD_UINT32)
+                .AddItem(B_TRANSLATE("Unsigned integer (64 bits)" B_UTF8_ELLIPSIS), MW_ADD_UINT64)
+                .AddSeparator()
+                .AddItem(B_TRANSLATE("Offset (off_t)" B_UTF8_ELLIPSIS), MW_ADD_OFF_T)
+                .AddItem(B_TRANSLATE("Size (size_t)" B_UTF8_ELLIPSIS), MW_ADD_SIZE_T)
+                .AddItem(B_TRANSLATE("Size or error code (ssize_t)" B_UTF8_ELLIPSIS), MW_ADD_SSIZE_T)
+            .End()
+            .AddMenu(B_TRANSLATE("Add floating-point number"))
+                .AddItem(B_TRANSLATE("Single precision (float)" B_UTF8_ELLIPSIS), MW_ADD_FLOAT)
+                .AddItem(B_TRANSLATE("Double precision (double)" B_UTF8_ELLIPSIS), MW_ADD_DOUBLE)
+            .End()
+            .AddMenu(B_TRANSLATE("Add measurement"))
+                .AddItem(B_TRANSLATE("Point" B_UTF8_ELLIPSIS), MW_ADD_POINT)
+                .AddItem(B_TRANSLATE("Size" B_UTF8_ELLIPSIS), MW_ADD_SIZE)
+                .AddItem(B_TRANSLATE("Rect" B_UTF8_ELLIPSIS), MW_ADD_RECT)
+            .End()
+            .AddMenu(B_TRANSLATE("Add reference"))
+                .AddItem(B_TRANSLATE("Reference to file entry (entry_ref)" B_UTF8_ELLIPSIS), MW_ADD_ENTRY_REF)
+                .AddItem(B_TRANSLATE("Reference to file node (node_ref)" B_UTF8_ELLIPSIS), MW_ADD_NODE_REF)
+            .End()
+            .AddItem(B_TRANSLATE("Add string" B_UTF8_ELLIPSIS), MW_ADD_STRING)
+			.AddSeparator()
+			.AddItem(B_TRANSLATE("Import message file" B_UTF8_ELLIPSIS), MW_IMPORT_MESSAGE)
+		.End()
+		.AddMenu(B_TRANSLATE("Message"))
+            .AddItem(B_TRANSLATE("Set type (\'what\' field)" B_UTF8_ELLIPSIS), MW_MESSAGE_OPEN_SET_WHAT_DIALOG, 'T')
+            .AddItem(B_TRANSLATE("Make empty" B_UTF8_ELLIPSIS), MW_MESSAGE_MAKE_EMPTY)
+			.AddItem(B_TRANSLATE("Information" B_UTF8_ELLIPSIS), MW_MESSAGE_INFORMATION, 'I')
+        .End()
+		.AddMenu(B_TRANSLATE("View"))
+			.AddItem(B_TRANSLATE("Data viewer panel"), MW_DATA_PANEL_VISIBLE)
+		.End()
 		.AddMenu(B_TRANSLATE("Help"))
-			.AddItem(B_TRANSLATE("About"), MW_MENU_ABOUT)
+			.AddItem(B_TRANSLATE("About" B_UTF8_ELLIPSIS), MW_MENU_ABOUT)
 		.End()
 	.End();
 
 	fTopMenuBar->FindItem(MW_SAVE_MESSAGEFILE)->SetEnabled(false);
 	fTopMenuBar->FindItem(MW_RELOAD_FROM_FILE)->SetEnabled(false);
 	fTopMenuBar->FindItem(MW_CLOSE_MESSAGEFILE)->SetEnabled(false);
+	fTopMenuBar->FindItem(MW_DATA_PANEL_VISIBLE)->SetMarked(!fDataView->IsHidden());
+	fTopMenuBar->FindItem(MW_MESSAGE_INFORMATION)->SetEnabled(false); // Not yet implemented
 
 	//define main layout
 	BLayoutBuilder::Group<>(this, B_VERTICAL,0)
 		.SetInsets(0)
 		.Add(fTopMenuBar)
-		.AddGroup(B_HORIZONTAL)
+		.AddSplit(B_VERTICAL, B_USE_SMALL_SPACING)
 			.SetInsets(-1,-1,-1,-1)
-			.Add(fMessageInfoView,20)
+			.Add(fMessageInfoView, 0.5f)
+			.Add(fDataView, 0.2f)
+		.End()
 	.Layout();
 
 	fUnsaved = false;
@@ -70,9 +123,6 @@ MainWindow::MainWindow(BRect geometry)
 
 MainWindow::~MainWindow()
 {
-
-	delete fOpenFilePanel;
-
 }
 
 
@@ -122,24 +172,22 @@ MainWindow::MessageReceived(BMessage *msg)
 		// Open file menu was selected
 		case MW_OPEN_MESSAGEFILE:
 		{
-			if (fUnsaved)
-			{
-				if(!continue_action(notsaved_alert_text,
-									notsaved_alert_cancel,
-									notsaved_alert_continue))
-				{
+			if(fUnsaved) { // Ask for confirmation if there are pending changes
+				if(!continue_action(notsaved_alert_text, notsaved_alert_cancel,
+				notsaved_alert_continue))
 					break;
-				}
 			}
 
-			fOpenFilePanel->Show();
+			BMessage request(msg->what);
+			request.AddMessenger(KottanFieldMsgr, this);
+			be_app->PostMessage(&request);
 			break;
 		}
 
 		// Save file menu was selected
 		case MW_SAVE_MESSAGEFILE:
+		case MW_SAVE_MESSAGEFILE_AS:
 		{
-
 			be_app->PostMessage(msg);
 			break;
 		}
@@ -231,7 +279,7 @@ MainWindow::MessageReceived(BMessage *msg)
 			break;
 		}
 
-		case MV_ROW_CLICKED:
+		case MV_ROW_CLICKED: // Data member was double clicked
 		{
 			BRow *selected_row = fMessageInfoView->CurrentSelection();
 
@@ -269,6 +317,39 @@ MainWindow::MessageReceived(BMessage *msg)
 			break;
 		}
 
+		case MV_SELECTION_CHANGED: // Data member has just been selected
+		{
+			BRow* selectedRow = fMessageInfoView->CurrentSelection();
+			BStringField* typeField = ((BStringField*)selectedRow->GetField(2));
+			if(!typeField)
+				break;
+
+			if(strcmp(typeField->String(), "B_MESSAGE_TYPE") != 0) {
+				//get index path to data of selected field
+				BMessage selection_path_msg(MW_ROW_SELECTED_OPEN_HERE);
+				BRow *parent_row;
+				BRow *current_row = selectedRow;
+
+				while (fMessageInfoView->FindParent(current_row, &parent_row, NULL))
+				{
+					int32 field_index = static_cast<BIntegerField*>(current_row->GetField(0))->Value();
+
+					selection_path_msg.AddInt32("selection_path",field_index);
+					current_row = parent_row;
+				}
+
+				int32 top_parent_index = static_cast<BIntegerField*>(current_row->GetField(0))->Value();
+				selection_path_msg.AddInt32("selection_path",top_parent_index);
+				selection_path_msg.AddPointer("target", fDataView);
+
+				be_app->PostMessage(&selection_path_msg);
+			}
+			else {
+				fDataView->Clear();
+			}
+			break;
+		}
+
 		case MW_WAS_EDITED:
 		{
 			switch_unsaved_state(true);
@@ -278,6 +359,14 @@ MainWindow::MessageReceived(BMessage *msg)
 
 		case MW_WAS_SAVED:
 		{
+			BString filePath;
+			if(msg->FindString("filePath", &filePath) == B_OK) {
+				// Set the window's title with the file path
+				// fprintf(stderr, "Title is %s.\n", filePath.String());
+				BString appTitle(kAppName);
+				appTitle << ": " << filePath.String();
+				SetTitle(appTitle);
+			}
 			switch_unsaved_state(false);
 			break;
 		}
@@ -319,7 +408,89 @@ MainWindow::MessageReceived(BMessage *msg)
 		case MW_UPDATE_MESSAGEVIEW:
 		{
 			fMessageInfoView->UpdateData();
+			fDataView->Clear();
 			switch_unsaved_state(false);
+			break;
+		}
+
+		// Add an entry of type...
+		case MW_ADD_AFFINE_TX:
+		case MW_ADD_ALIGNMENT:
+		case MW_ADD_BOOL:
+		case MW_ADD_COLOR:
+		case MW_ADD_INT8:
+		case MW_ADD_INT16:
+		case MW_ADD_INT32:
+		case MW_ADD_INT64:
+		case MW_ADD_UINT8:
+		case MW_ADD_UINT16:
+		case MW_ADD_UINT32:
+		case MW_ADD_UINT64:
+		case MW_ADD_OFF_T:
+		case MW_ADD_SIZE_T:
+		case MW_ADD_SSIZE_T:
+		case MW_ADD_FLOAT:
+		case MW_ADD_DOUBLE:
+		case MW_ADD_ENTRY_REF:
+		case MW_ADD_NODE_REF:
+		case MW_ADD_STRING:
+		case MW_ADD_POINT:
+		case MW_ADD_SIZE:
+		case MW_ADD_RECT:
+		{
+			BMessage editorData(MW_CREATE_ENTRY_REQUESTED);
+			editorData.AddBool("create", true);
+			editorData.AddUInt32(KottanFieldType, static_cast<uint32>(TypeCodeForCommand(msg->what)));
+			be_app->PostMessage(&editorData);
+			break;
+		}
+
+		case MW_IMPORT_MESSAGE:
+		{
+			ImporterWindow* window = new ImporterWindow(BRect());
+			window->CenterIn(Frame());
+			window->Show();
+			break;
+		}
+
+		case MW_MESSAGE_OPEN_SET_WHAT_DIALOG:
+			be_app->PostMessage(MW_MESSAGE_OPEN_SET_WHAT_DIALOG);
+			break;
+
+		case MW_MESSAGE_MAKE_EMPTY:
+		{
+			if(continue_action(B_TRANSLATE("Do you want to delete all the entries of this message?"),
+			notsaved_alert_cancel, B_TRANSLATE("Delete all")))
+				be_app->PostMessage(MW_MESSAGE_MAKE_EMPTY);
+			break;
+		}
+
+		// Call to summon a EditWindow from the MainWindow-owned DataView
+		case DW_ROW_CLICKED:
+		{
+			BMessage request(msg->what);
+			request.AddInt32(KottanFieldIndex, msg->GetInt32(KottanFieldIndex, 0));
+			request.AddString(KottanFieldName, msg->GetString(KottanFieldName));
+			request.AddUInt32(KottanFieldType, msg->GetUInt32(KottanFieldType, B_ANY_TYPE));
+			request.AddPointer("window", this);
+			be_app->PostMessage(&request);
+			break;
+		}
+
+		case DW_ROW_REMOVE_REQUESTED:
+		{
+			if((new BAlert("", B_TRANSLATE("Do you want to remove this item?"),
+			B_TRANSLATE("Remove"), B_TRANSLATE("Keep")))->Go() == 0) {
+				be_app->PostMessage(msg);
+				// Quit();
+			}
+			break;
+		}
+
+		case MW_DATA_PANEL_VISIBLE:
+		case DW_BUTTON_CLOSE:
+		{
+			ToggleDataViewVisibility();
 			break;
 		}
 
@@ -412,4 +583,17 @@ MainWindow::switch_unsaved_state(bool unsaved_state)
 		}
 	}
 
+}
+
+void
+MainWindow::ToggleDataViewVisibility()
+{
+	if(fDataView->IsHidden()) {
+		fTopMenuBar->FindItem(MW_DATA_PANEL_VISIBLE)->SetMarked(true);
+		fDataView->Show();
+	}
+	else  {
+		fTopMenuBar->FindItem(MW_DATA_PANEL_VISIBLE)->SetMarked(false);
+		fDataView->Hide();
+	}
 }

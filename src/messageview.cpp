@@ -20,6 +20,7 @@ MessageView::MessageView()
 	:
 	BColumnListView("messageview",0)
 {
+	SetSelectionMessage(new BMessage(MV_SELECTION_CHANGED));
 	SetInvocationMessage(new BMessage(MV_ROW_CLICKED));
 
 	BIntegerColumn *index_column = new BIntegerColumn(B_TRANSLATE("Index"),70,10,100);

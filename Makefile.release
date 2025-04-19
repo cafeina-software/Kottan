@@ -14,6 +14,10 @@ SRCS = \
 	 src/datawindow.cpp  \
 	 src/mainwindow.cpp  \
 	 src/messageview.cpp  \
+	 src/whatwindow.cpp  \
+	 src/importerwindow.cpp  \
+	 src/gettype.cpp  \
+	 src/visualwindow.cpp  \
 
 RDEFS = \
 	 Kottan.rdef  \
@@ -38,7 +42,7 @@ RSRC = \
 
 #%}
 
-LIBS = $(STDCPPLIBS) be root localestub columnlistview tracker
+LIBS = $(STDCPPLIBS) be root localestub columnlistview tracker shared bnetapi
 LIBPATHS =
 SYSTEM_INCLUDE_PATHS = /boot/system/develop/headers/private/interface
 LOCAL_INCLUDE_PATHS =

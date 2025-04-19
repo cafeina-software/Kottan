@@ -5,9 +5,12 @@
  */
 
 #include "app.h"
+#include "importerwindow.h"
+#include "kottandefs.h"
 #include "mainwindow.h"
 #include "datawindow.h"
 #include "editwindow.h"
+#include "whatwindow.h"
 
 #include <AboutWindow.h>
 #include <Catalog.h>
@@ -15,8 +18,11 @@
 #include <AppFileInfo.h>
 #include <Path.h>
 #include <File.h>
+#include <IconUtils.h>
 #include <FindDirectory.h>
 #include <NodeMonitor.h>
+#include <Roster.h>
+#include <stdio.h>
 
 
 #undef B_TRANSLATION_CONTEXT
@@ -25,27 +31,43 @@
 
 const char* kAppName = "Kottan";
 const char* kAppSignature = "application/x-vnd.BlueSky-Kottan";
-
+BBitmap* trashIcon;
+BBitmap* removeIcon;
 
 App::App()
 	:
 	BApplication(kAppSignature)
 
 {
-
 	fDataMessage = new BMessage();
 	fMessageList = new BObjectList<IndexMessage>(20, false);
 	fMessageFile = new BFile();
 	fDataWindow = NULL;
+
+	/* File panels stuff */
+	BPath userDirectoryPath;
+	find_directory(B_USER_DIRECTORY, &userDirectoryPath);
+	BEntry userDirectoryEntry(userDirectoryPath.Path());
+	entry_ref userDirectoryRef;
+	userDirectoryEntry.GetRef(&userDirectoryRef);
+	fMessageFilter = new MessageFileFilter;
+	fOpenPanel = new BFilePanel(B_OPEN_PANEL, NULL, &userDirectoryRef, B_FILE_NODE, false, NULL, NULL);
+	fSavePanel = new BFilePanel(B_SAVE_PANEL, NULL, &userDirectoryRef, B_FILE_NODE, false, NULL, NULL);
+
+	/* Init shared resources */
+	InitSharedResources();
 }
 
 
 App::~App()
 {
-
 	delete fDataMessage;
 	delete fMessageFile;
+	delete fOpenPanel;
+	delete fSavePanel;
+	delete fMessageFilter;
 
+	FreeSharedResources();
 }
 
 
@@ -55,6 +77,15 @@ App::MessageReceived(BMessage *msg)
 
 	switch(msg->what)
 	{
+		// Open panel requested to open a file
+		case MW_OPEN_MESSAGEFILE:
+		{
+			BMessenger messenger;  // The result will be delivered to it
+			msg->FindMessenger(KottanFieldMsgr, &messenger);
+			ShowFilePanel(fOpenPanel, &messenger, new BMessage(MW_REF_MESSAGEFILE), fMessageFilter);
+			break;
+		}
+
 		//receive file reference, read the file and extract into message
 		case MW_INSPECTMESSAGEFILE:
 		{
@@ -145,11 +176,37 @@ App::MessageReceived(BMessage *msg)
 			break;
 		}
 
+		// Get info about clicked row inside the window (data panel)
+		case MW_ROW_SELECTED_OPEN_HERE:
+		{
+			get_selection_data(msg);
+
+			BMessage *dw_message;
+
+			if (fMessageList->CountItems() > 0)
+			{
+				dw_message = fMessageList->FirstItem()->message;
+			}
+			else
+			{
+				dw_message = fDataMessage;
+			}
+
+			const void* ptr = msg->GetPointer("target");
+			if(ptr) {
+				if(!fSelectedName || strlen(fSelectedName) == 0)
+					fSelectedName = msg->GetString(KottanFieldName);
+				((DataView*)ptr)->SetTo(dw_message, fSelectedName, fSelectedType, fSelectedItemCount);
+			}
+
+			break;
+		}
+
 		// get info about clicked row in DataWindow and open EditWindow
 		case DW_ROW_CLICKED:
 		{
 			int32 field_index;
-			msg->FindInt32("field_index", &field_index);
+			msg->FindInt32(KottanFieldIndex, &field_index);
 
 			BMessage *ew_message;
 
@@ -162,16 +219,51 @@ App::MessageReceived(BMessage *msg)
 				ew_message = fDataMessage;
 			}
 
-			EditWindow *edit_window = new EditWindow(BRect(0,0,0,0),
-													ew_message,
-													fSelectedType,
-													fSelectedName,
-													field_index);
-			edit_window->CenterIn(fDataWindow->Frame());
+			BMessage editorData;
+			editorData.AddBool(KottanFlagCreate, false);
+			editorData.AddPointer("data_message", ew_message);
+			editorData.AddString(KottanFieldName, fSelectedName);
+			editorData.AddUInt32(KottanFieldType, (uint32)fSelectedType);
+			editorData.AddInt32(KottanFieldCount, fSelectedItemCount);
+
+			EditWindow *edit_window = new EditWindow(BRect(0,0,0,0), ew_message, fSelectedType, fSelectedName, field_index);
+			BWindow* window = (BWindow*)msg->GetPointer("window");
+			if(window)
+				edit_window->CenterIn(window->Frame());
 			fDataWindow->SetFeel(B_NORMAL_WINDOW_FEEL);
 			//edit_window->AddToSubset(fDataWindow);
 			edit_window->Show();
 
+			break;
+		}
+
+		case DW_ROW_REMOVE_REQUESTED:
+		{
+			int32 field_index;
+			BString field_name;
+			type_code field_type;
+			if(msg->FindInt32(KottanFieldIndex, &field_index) == B_OK &&
+			msg->FindString(KottanFieldName, &field_name) == B_OK &&
+			msg->FindUInt32(KottanFieldType, static_cast<uint32*>(&field_type)) == B_OK) {
+				fDataMessage->RemoveData(field_name, field_index);
+				fMainWindow->PostMessage(MW_UPDATE_MESSAGEVIEW); // Update message view
+				fMainWindow->PostMessage(MW_WAS_EDITED); // Mark title bar as "has pending changes"
+			}
+
+			break;
+		}
+
+		// Opens the EditWindow to create a new entry (rather than editing an existing one)
+		case MW_CREATE_ENTRY_REQUESTED:
+		{
+			type_code type;
+			msg->FindUInt32(KottanFieldType, static_cast<uint32*>(&type));
+			bool creationFlag = msg->GetBool("create");
+
+			EditWindow* editorWindow = new EditWindow(BRect(), fDataMessage,
+				type, "" /* Ignored */, -1 /* Ignored */, creationFlag);
+			editorWindow->CenterIn(fMainWindow->Frame());
+			editorWindow->Show();
 			break;
 		}
 
@@ -196,6 +288,8 @@ App::MessageReceived(BMessage *msg)
 			}
 
 			fDataWindow->PostMessage(DW_UPDATE);
+			if(msg->GetBool(KottanFlagCreate))
+				fMainWindow->PostMessage(MW_UPDATE_MESSAGEVIEW);
 			fMainWindow->PostMessage(MW_WAS_EDITED);
 
 			break;
@@ -212,19 +306,81 @@ App::MessageReceived(BMessage *msg)
 		// save message data to file
 		case MW_SAVE_MESSAGEFILE:
 		{
+			if(!HasFile()) {
+				PostMessage(MW_SAVE_MESSAGEFILE_AS);
+				break;
+			}
+
 			fMessageFile->SetTo(&fMessageFileRef, B_WRITE_ONLY|B_ERASE_FILE);
 			fDataMessage->Flatten(fMessageFile);
 			fMainWindow->PostMessage(MW_WAS_SAVED);
+			break;
+		}
 
+		case MW_SAVE_MESSAGEFILE_AS:
+		{
+			BMessenger messenger(this);
+			ShowFilePanel(fSavePanel, &messenger, new BMessage(B_SAVE_REQUESTED), fMessageFilter);
+			break;
+		}
+
+		case B_SAVE_REQUESTED:
+		{
+			entry_ref directoryRef;
+			BString name;
+
+			if(msg->FindRef("directory", &directoryRef) != B_OK ||
+			msg->FindString("name", &name) != B_OK) {
+				// fprintf(stderr, "Error: missing fields.\n");
+				break; // return B_ERROR;
+			}
+
+			BDirectory directory(&directoryRef);
+			BEntry fileEntry(&directory, name.String());
+
+			uint32 fileFlags = B_WRITE_ONLY | B_ERASE_FILE;
+			if(!fileEntry.Exists())
+				fileFlags |= B_CREATE_FILE;
+			BFile newFile(&directory, name.String(), fileFlags);
+			if(newFile.InitCheck() != B_OK) {
+				// fprintf(stderr, "Error: file could not be initialized for write.\n");
+				break; // return B_FILE_ERROR;
+			}
+
+			status_t result = fDataMessage->Flatten(&newFile);
+			if(result == B_OK) { // On success...
+				// update data members
+				fMessageFile->Unset();
+				fMessageFile->SetTo(&directory, name.String(), B_READ_ONLY);
+				fileEntry.GetRef(&fMessageFileRef);
+
+				// update monitoring target
+				node_ref nref;
+				fileEntry.GetNodeRef(&nref);
+				watch_node(&nref, B_WATCH_STAT | B_WATCH_INTERIM_STAT, be_app_messenger);
+
+				// send notification to window
+				BPath entryPath(&directory, name.String());
+				BMessage reply(MW_WAS_SAVED);
+				reply.AddString("filePath", entryPath.Path());
+				fMainWindow->PostMessage(&reply);
+			}
 			break;
 		}
 
 		// Close file requested
 		case MW_CLOSE_MESSAGEFILE:
 		{
+			// Stop watching the node of the file closed
+			node_ref nref;
+			BEntry(&fMessageFileRef).GetNodeRef(&nref);
+			watch_node(&nref, B_STOP_WATCHING, be_app_messenger);
+
+			// Update data
 			fMessageFile->Unset();
 			fDataMessage->MakeEmpty();
 
+			// Notify the window
 			BMessage reply(MW_CLOSE_REPLY);
 			reply.AddBool("success", true);
 			fMainWindow->PostMessage(&reply);
@@ -269,6 +425,110 @@ App::MessageReceived(BMessage *msg)
 				fDataWindow->PostMessage(DW_UPDATE);
 			}
 
+			break;
+		}
+
+		// Opens the dialog to change the message type ('what')
+		case MW_MESSAGE_OPEN_SET_WHAT_DIALOG:
+		{
+			WhatWindow* whatwnd = new WhatWindow(BRect(), fDataMessage);
+			whatwnd->CenterIn(fMainWindow->Frame());
+			whatwnd->Show();
+			break;
+		}
+
+		// Applies the change of the message type ('what')
+		case WCMD_SAVE_WHAT_REQUESTED:
+		{
+			uint32 what = 0;
+			if(msg->FindUInt32("what", &what) == B_OK) {
+				fDataMessage->what = what;
+				fMainWindow->PostMessage(MW_WAS_EDITED);
+			}
+			break;
+		}
+
+		// Deletes all the data members of the message
+		case MW_MESSAGE_MAKE_EMPTY:
+		{
+			// Immediate effect;
+			fDataMessage->MakeEmpty();
+			if(fMessageList->CountItems() > 0)
+				fMessageList->MakeEmpty();
+
+			fMainWindow->PostMessage(MW_UPDATE_MESSAGEVIEW); // Update message view
+			fMainWindow->PostMessage(MW_WAS_EDITED); // Mark title bar as "has pending changes"
+			if(fDataWindow)
+				fDataWindow->Close();
+			break;
+		}
+
+		// Used by the importer dialog box to call an open panel
+		case IMP_OPEN_REQUESTED:
+		{
+			BMessenger messenger;
+			msg->FindMessenger("target", &messenger);
+			ShowFilePanel(fOpenPanel, &messenger, new BMessage(IMP_OPEN_REPLY), fMessageFilter);
+			break;
+		}
+
+		// The request for import a message was received, it will be dealt here
+		case IMP_SAVE_REQUESTED:
+		{
+			entry_ref ref;
+			if(msg->FindRef("refs", &ref) == B_OK && BEntry(&ref).Exists()) {
+				bool memberMode = msg->GetBool(KottanFlagImportMember);
+				BFile file(&ref, B_READ_ONLY);
+				if(file.InitCheck() != B_OK)
+					break;
+				BMessage message;
+				message.Unflatten(&file);
+
+				const void* data = NULL;
+				if(memberMode)
+					data = (const void*)msg->GetString(KottanFieldName);
+
+				status_t result = ImportMessage(&message, memberMode, data);
+				if(result == B_OK) { // Call to update UI on success
+					fMainWindow->PostMessage(MW_UPDATE_MESSAGEVIEW); // Update message view
+					fMainWindow->PostMessage(MW_WAS_EDITED); // Mark title bar as "has pending changes"
+				}
+			}
+			break;
+		}
+
+		// Request to call the Open Panel to retrieve a file entry
+		case EV_REF_REQUESTED:
+		{
+			BMessenger messenger;
+			msg->FindMessenger(KottanFieldMsgr, &messenger);
+			ShowFilePanel(fOpenPanel, &messenger, new BMessage(EW_REFS_RECEIVED), NULL);
+			break;
+		}
+
+		// Perform a request to the Visual Window
+		case EV_MEASUREMENT_REQUESTED:
+		{
+			type_code type = static_cast<type_code>(msg->GetUInt32(KottanFieldType, B_ANY_TYPE));
+
+			BPoint point;
+			BSize size;
+			BRect rect = fMainWindow->Frame();
+			if(type == B_POINT_TYPE)
+				point = fDataMessage->GetPoint(
+					msg->GetString(KottanFieldName),
+					msg->GetInt32(KottanFieldIndex, 0), BPoint());
+			else if(type == B_SIZE_TYPE)
+				size = fDataMessage->GetSize(msg->GetString(KottanFieldName),
+					msg->GetInt32(KottanFieldIndex, 0), BSize());
+			else if(type == B_RECT_TYPE)
+				rect = fDataMessage->GetRect(msg->GetString(KottanFieldName),
+					msg->GetInt32(KottanFieldIndex, 0), BRect());
+
+			fVisualWindow->SetTo(rect, size, point, type, (BLooper*)msg->GetPointer("target"));
+			if(fMainWindow)
+				fVisualWindow->CenterIn(fMainWindow->Frame());
+			fVisualWindow->Show();
 			break;
 		}
 
@@ -356,6 +616,15 @@ App::AboutRequested()
 	aboutwindow->SetVersion(version_string.String());
 	aboutwindow->AddDescription(B_TRANSLATE("An editor for archived BMessages"));
 	aboutwindow->AddExtraInfo(extra_info.String());
+	const char* extraCreds [] = {
+		B_TRANSLATE("The icon \'R_TrashFullIcon\' is part of Haiku and licensed under MIT license."),
+		B_TRANSLATE("The icon \'Action_Stop\' is part of Haiku and licensed under MIT license."),
+		NULL
+	};
+	aboutwindow->AddText(B_TRANSLATE("Extra credits:"), extraCreds);
+
+	if(fMainWindow)
+		aboutwindow->CenterIn(fMainWindow->Frame());
 	aboutwindow->Show();
 
 }
@@ -426,6 +695,8 @@ App::ReadyToRun()
 		fMainWindow->CenterOnScreen();
 	}
 	fMainWindow->Show();
+
+	fVisualWindow = new VisualWindow(BRect(), NULL, NULL);
 
 	delete settings_file;
 
@@ -522,6 +793,81 @@ App::get_selection_data(BMessage *selection_path_message)
 
 }
 
+status_t
+App::ImportMessage(BMessage* msg, bool memberMode, [[maybe_unused]] const void* data)
+{
+	if(!msg || (memberMode && !data))
+		return B_BAD_VALUE;
+
+	if(memberMode) {
+		fDataMessage->AddMessage(reinterpret_cast<const char*>(data), msg);
+	}
+	else {
+		char* name;
+		type_code type;
+		int32 countfound;
+		for(int32 i = 0; msg->GetInfo(B_ANY_TYPE, i, &name, &type, &countfound) == B_OK; i++) {
+			for(int32 j = 0; j < countfound; j++) {
+				const void* data = NULL;
+				ssize_t length = 0;
+				msg->FindData(name, type, j, &data, &length);
+				unsigned char* buffer = new unsigned char[length];
+				memcpy(buffer, data, length);
+				fDataMessage->AddData(name, type, buffer, length);
+				delete[] buffer;
+			}
+		}
+	}
+	return B_OK;
+}
+
+// #pragma mark - App::Private
+
+void
+App::InitSharedResources()
+{
+	trashIcon = new BBitmap(BRect(0, 0, 31, 31), B_RGBA32);
+	App::LoadIcon(1004, &trashIcon);
+
+	// trashIcon = new BBitmap(BRect(0, 0, 31, 31), B_RGBA32);
+	// entry_ref trkref;
+	// be_roster->FindApp("application/x-vnd.Be-TRAK", &trkref);
+	// BFile trackerFile(&trkref, B_READ_ONLY);
+	// BResources trackerRes(&trackerFile, false);
+	// size_t bitmapSize = 0;
+	// const void* bitmapData = trackerRes.LoadResource(B_VECTOR_ICON_TYPE, 1004, &bitmapSize);
+	// BIconUtils::GetVectorIcon(reinterpret_cast<const uint8*>(bitmapData), bitmapSize, trashIcon);
+
+	removeIcon = new BBitmap(BRect(0, 0, 31, 31), B_RGBA32);
+	App::LoadIcon(138, &removeIcon);
+}
+
+void
+App::FreeSharedResources()
+{
+	delete trashIcon;
+	delete removeIcon;
+}
+
+void
+App::LoadIcon(int32 id, BBitmap** outBitmap)
+{
+	BResources* resources = BApplication::AppResources();
+	size_t bitmapSize = 0;
+	const void* bitmapData = resources->LoadResource(B_VECTOR_ICON_TYPE, id, &bitmapSize);
+	BIconUtils::GetVectorIcon(reinterpret_cast<const uint8*>(bitmapData), bitmapSize, *outBitmap);
+}
+
+void
+App::ShowFilePanel(BFilePanel* panel, BMessenger* target, BMessage* message, BRefFilter* refFilter)
+{
+	panel->SetTarget(*target);
+	panel->SetMessage(message);
+	panel->SetRefFilter(refFilter);
+	panel->Show();
+}
+
+// #pragma mark - main
 
 int
 main(int argc, char** argv)

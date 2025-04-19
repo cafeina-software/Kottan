@@ -7,13 +7,14 @@
 #ifndef MESSAGEVIEW_H
 #define MESSAGEVIEW_H
 
-#include <ColumnListView.h>
+#include <private/interface/ColumnListView.h>
 #include <Message.h>
 
 
 enum
 {
 	MV_ROW_CLICKED ='mv00',
+	MV_SELECTION_CHANGED
 };
 
 

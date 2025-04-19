@@ -3,10 +3,32 @@
  * All rights reserved. Distributed under the terms of the MIT license.
  *
  */
+#ifndef __GET_TYPE__
+#define __GET_TYPE__
 
 #include <String.h>
+#include <sys/socket.h>
+#include "mainwindow.h"
 
-static BString 
+#if !(__has_cpp_attribute(maybe_unused))
+// If using anything older than C++ 17, let's avoid errors
+# if defined(__GNUC__)
+#  define [[maybe_unused]] __attribute__((unused))
+# else
+#  define [[maybe_unused]]
+# endif
+#endif
+
+[[maybe_unused]] type_code TypeCodeForString(const char* str);
+
+[[maybe_unused]] static type_code
+TypeCodeForString(BString str) {
+    return TypeCodeForString(str.String());
+}
+
+[[maybe_unused]] type_code TypeCodeForCommand(uint32 command);
+
+[[maybe_unused]] static BString
 get_type(type_code typecode)
 {
 
@@ -155,6 +177,12 @@ get_type(type_code typecode)
 		case B_MONOCHROME_1_BIT_TYPE:
 		{
 			typecode_name="B_MONOCHROME_1_BIT_TYPE";
+			break;
+		}
+
+		case B_NODE_REF_TYPE:
+		{
+			typecode_name="B_NODE_REF_TYPE";
 			break;
 		}
 
@@ -314,14 +342,18 @@ get_type(type_code typecode)
 			break;
 		}
 
-	
+
 		default:
 		{
-			typecode_name = "unidentified"; 
-		
+			typecode_name = "unidentified";
+
 		}
 	}
 
 	return typecode_name;
 
 }
+
+[[maybe_unused]] BString NetAddressFamilyString(sa_family_t family);
+
+#endif
