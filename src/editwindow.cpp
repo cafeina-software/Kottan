@@ -14,30 +14,34 @@
 #include <Path.h>
 #include <cassert>
 #include <cstdio>
+#include <ctime>
+
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "EditWindow"
 
 
 EditWindow::EditWindow(BRect frame, BMessage *data_message,
-	type_code data_type, const char *data_label, int32 data_index, bool creating)
+	type_code data_type, const char *data_label, int32 data_index, bool creating,
+	const void* caller)
 	: BWindow(frame, "", B_DOCUMENT_WINDOW_LOOK,B_MODAL_APP_WINDOW_FEEL, B_CLOSE_ON_ESCAPE
 		| B_NOT_ZOOMABLE | B_NOT_V_RESIZABLE | B_AUTO_UPDATE_SIZE_LIMITS),
 	dataMessage(data_message),
 	dataLabel(data_label),
 	dataType(data_type),
 	dataIndex(data_index),
-	isCreating(creating)
+	isCreating(creating),
+	callerMessenger(caller)
 {
 	SetTitle(isCreating ? B_TRANSLATE("Add new entry") : B_TRANSLATE("Edit entry"));
 
-	fEditView = new EditView(dataMessage, dataType, dataLabel, dataIndex, isCreating);
+	fEditView = new EditView(data_message, dataType, dataLabel, dataIndex, isCreating);
 	fCancelButton = new BButton(B_TRANSLATE("Cancel"), new BMessage(EW_BUTTON_CANCEL));
 	fSaveButton = new BButton(B_TRANSLATE("Save"), new BMessage(EW_BUTTON_SAVE));
 	fSaveButton->SetEnabled(false);
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_SMALL_SPACING)
 		.SetInsets(B_USE_SMALL_INSETS)
-		.Add((BView*)fEditView)
+		.Add(fEditView)
 		.AddStrut(B_USE_BIG_SPACING)
 		.AddGroup(B_HORIZONTAL)
 			.AddGlue()
@@ -47,6 +51,12 @@ EditWindow::EditWindow(BRect frame, BMessage *data_message,
 		.End()
 		.AddGlue(100)
 	.Layout();
+
+	AddShortcut('W', B_COMMAND_KEY, new BMessage(EW_BUTTON_CANCEL));
+}
+
+EditWindow::~EditWindow()
+{
 }
 
 void
@@ -59,6 +69,8 @@ EditWindow::MessageReceived(BMessage *msg)
 			fEditView->SaveData();
 			BMessage reply(msg->what);
 			reply.AddBool("create", isCreating);
+			if(callerMessenger)
+				reply.AddPointer("target", callerMessenger);
 			be_app->PostMessage(&reply);
 			Quit();
 			break;
@@ -70,6 +82,7 @@ EditWindow::MessageReceived(BMessage *msg)
 			break;
 
 		case EV_DATA_CHANGED:
+			fEditView->ValidateData();
 			fSaveButton->SetEnabled(fEditView->IsSaveable());
 			break;
 
@@ -93,6 +106,14 @@ EditWindow::MessageReceived(BMessage *msg)
 			be_app->PostMessage(&request);
 
 			Hide();
+			break;
+		}
+
+		case EV_GET_CURRENT_TIME:
+		{
+			time_t now = std::time(NULL);
+			fEditView->SetDataFor(fEditView->Type(), &now);
+			PostMessage(EV_DATA_CHANGED);
 			break;
 		}
 

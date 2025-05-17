@@ -28,7 +28,9 @@ public:
 							BMessage *data_message,
 							type_code data_type,
 							const char *data_label,
-							int32 data_index, bool creating = false);
+							int32 data_index, bool creating = false,
+							const void* caller = NULL);
+	virtual 			~EditWindow();
 	virtual	void 		MessageReceived(BMessage *msg);
 private:
 	BMessage    *dataMessage;
@@ -36,6 +38,7 @@ private:
 	type_code	 dataType;
 	int32		 dataIndex;
 	bool		 isCreating;
+	const void  *callerMessenger;
 
 	BButton		*fCancelButton;
 	BButton		*fSaveButton;

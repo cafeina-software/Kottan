@@ -10,6 +10,7 @@
 #include "mainwindow.h"
 #include "datawindow.h"
 #include "editwindow.h"
+#include "msginfowindow.h"
 #include "whatwindow.h"
 
 #include <AboutWindow.h>
@@ -61,6 +62,13 @@ App::App()
 
 App::~App()
 {
+	if(fVisualWindow && fVisualWindow->IsLocked())
+		fVisualWindow->Quit();
+	if(fDataWindow && fDataWindow->IsLocked())
+		fDataWindow->Quit();
+	if(fMainWindow && fMainWindow->IsLocked())
+		fMainWindow->Quit();
+
 	delete fDataMessage;
 	delete fMessageFile;
 	delete fOpenPanel;
@@ -192,11 +200,11 @@ App::MessageReceived(BMessage *msg)
 				dw_message = fDataMessage;
 			}
 
-			const void* ptr = msg->GetPointer("target");
-			if(ptr) {
+			DataView* view = (DataView*)msg->GetPointer("target");
+			if(view) {
 				if(!fSelectedName || strlen(fSelectedName) == 0)
 					fSelectedName = msg->GetString(KottanFieldName);
-				((DataView*)ptr)->SetTo(dw_message, fSelectedName, fSelectedType, fSelectedItemCount);
+				view->SetTo(dw_message, fSelectedName, fSelectedType, fSelectedItemCount);
 			}
 
 			break;
@@ -219,15 +227,13 @@ App::MessageReceived(BMessage *msg)
 				ew_message = fDataMessage;
 			}
 
-			BMessage editorData;
-			editorData.AddBool(KottanFlagCreate, false);
-			editorData.AddPointer("data_message", ew_message);
-			editorData.AddString(KottanFieldName, fSelectedName);
-			editorData.AddUInt32(KottanFieldType, (uint32)fSelectedType);
-			editorData.AddInt32(KottanFieldCount, fSelectedItemCount);
-
-			EditWindow *edit_window = new EditWindow(BRect(0,0,0,0), ew_message, fSelectedType, fSelectedName, field_index);
 			BWindow* window = (BWindow*)msg->GetPointer("window");
+			EditWindow *edit_window = new EditWindow(BRect(0,0,0,0), ew_message,
+				fSelectedType, fSelectedName, field_index, false, window);
+
+			// Get the window to position the editor window.
+			// The positioning fails if we derive the window from the looper
+			// using target.Target(&looper).
 			if(window)
 				edit_window->CenterIn(window->Frame());
 			fDataWindow->SetFeel(B_NORMAL_WINDOW_FEEL);
@@ -261,7 +267,8 @@ App::MessageReceived(BMessage *msg)
 			bool creationFlag = msg->GetBool("create");
 
 			EditWindow* editorWindow = new EditWindow(BRect(), fDataMessage,
-				type, "" /* Ignored */, -1 /* Ignored */, creationFlag);
+				type, "" /* Ignored */, -1 /* Ignored */, creationFlag,
+				fMainWindow);
 			editorWindow->CenterIn(fMainWindow->Frame());
 			editorWindow->Show();
 			break;
@@ -287,11 +294,14 @@ App::MessageReceived(BMessage *msg)
 											fMessageList->LastItem()->message);
 			}
 
-			fDataWindow->PostMessage(DW_UPDATE);
-			if(msg->GetBool(KottanFlagCreate))
-				fMainWindow->PostMessage(MW_UPDATE_MESSAGEVIEW);
-			fMainWindow->PostMessage(MW_WAS_EDITED);
+			void* target = NULL;
+			if(msg->FindPointer("target", &target) == B_OK) {// Call to update views
+				static_cast<BWindow*>(target)->PostMessage(DW_UPDATE); // Either main window or a data window
+			}
 
+			if(msg->GetBool(KottanFlagCreate)) // If creation mode, update main msg view
+				fMainWindow->PostMessage(MW_UPDATE_MESSAGEVIEW);
+			fMainWindow->PostMessage(MW_WAS_EDITED); // Mark window title as modified
 			break;
 		}
 
@@ -331,8 +341,7 @@ App::MessageReceived(BMessage *msg)
 
 			if(msg->FindRef("directory", &directoryRef) != B_OK ||
 			msg->FindString("name", &name) != B_OK) {
-				// fprintf(stderr, "Error: missing fields.\n");
-				break; // return B_ERROR;
+				break;
 			}
 
 			BDirectory directory(&directoryRef);
@@ -343,8 +352,7 @@ App::MessageReceived(BMessage *msg)
 				fileFlags |= B_CREATE_FILE;
 			BFile newFile(&directory, name.String(), fileFlags);
 			if(newFile.InitCheck() != B_OK) {
-				// fprintf(stderr, "Error: file could not be initialized for write.\n");
-				break; // return B_FILE_ERROR;
+				break;
 			}
 
 			status_t result = fDataMessage->Flatten(&newFile);
@@ -463,12 +471,22 @@ App::MessageReceived(BMessage *msg)
 			break;
 		}
 
+		// Called to open a message information dialog box of the current message
+		case MW_MESSAGE_INFORMATION:
+		{
+			MsgInfoWindow* window = new MsgInfoWindow(BRect(), fDataMessage);
+			window->CenterIn(fMainWindow->Frame());
+			window->Show();
+			break;
+		}
+
 		// Used by the importer dialog box to call an open panel
 		case IMP_OPEN_REQUESTED:
 		{
 			BMessenger messenger;
 			msg->FindMessenger("target", &messenger);
 			ShowFilePanel(fOpenPanel, &messenger, new BMessage(IMP_OPEN_REPLY), fMessageFilter);
+			fOpenPanel->Window()->CenterIn(fMainWindow->Frame());
 			break;
 		}
 

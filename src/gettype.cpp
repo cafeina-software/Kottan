@@ -161,6 +161,8 @@ TypeCodeForCommand(uint32 command)
 			return B_SIZE_TYPE;
 		case MW_ADD_RECT:
 			return B_RECT_TYPE;
+		case MW_ADD_TIME:
+			return B_TIME_TYPE;
 		default:
 			return B_ANY_TYPE;
 	}

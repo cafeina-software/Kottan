@@ -18,6 +18,7 @@
 #include <Path.h>
 #include <Application.h>
 #include <StatusBar.h>
+#include <ControlLook.h>
 #include <iomanip>
 #include <sstream>
 #include <sys/socket.h>
@@ -50,11 +51,10 @@ DataView::SetTo(BMessage* data, BString name, type_code type, int32 count)
     fFieldType = type;
     fItemCount = count;
 
-	if(!Window()->IsLocked())
-		LockLooper();
+	LockLooper();
 
 	if(!data) {
-		fDataLabel->SetText("");
+		SetLabel(NULL, NULL);
 		fDataView->Clear();
 		if(Window()->IsLocked())
 			UnlockLooper();
@@ -63,6 +63,7 @@ DataView::SetTo(BMessage* data, BString name, type_code type, int32 count)
 
 	if(type == B_MESSAGE_TYPE) {
 		fDataView->Clear();
+		SetLabel(fFieldName.String(), get_type(fFieldType).String());
 		if(Window()->IsLocked())
 			UnlockLooper();
 		return B_OK;
@@ -70,10 +71,7 @@ DataView::SetTo(BMessage* data, BString name, type_code type, int32 count)
 
 	Clear();
 
-	BString label("%fieldName% (%fieldType%)");
-	label.ReplaceAll("%fieldName%", fFieldName.String());
-	label.ReplaceAll("%fieldType%", get_type(fFieldType).String());
-	fDataLabel->SetText(label);
+	SetLabel(fFieldName.String(), get_type(fFieldType).String());
 
 	for(int i = 0; i < count; i++) {
 		BString itemData;
@@ -167,6 +165,19 @@ DataView::SetTo(BMessage* data, BString name, type_code type, int32 count)
 				else
 					itemData = B_TRANSLATE("false");
 
+				break;
+			}
+
+			case B_CHAR_TYPE:
+			{
+				const void* ptr = NULL;
+				ssize_t length = 0;
+				fDataMessage->FindData(fFieldName, fFieldType, i, &ptr, &length);
+				char c = *(static_cast<const char*>(ptr));
+				if(isprint(static_cast<unsigned char>(c)) != 0)
+					itemData << c;
+				else
+					itemData << B_TRANSLATE("data cannot be displayed");
 				break;
 			}
 
@@ -361,6 +372,34 @@ DataView::SetTo(BMessage* data, BString name, type_code type, int32 count)
 				itemData = fDataMessage->GetString(fFieldName, i, "");
 				break;
 
+			case B_TIME_TYPE:
+			{
+				const void* ptr = NULL;
+				ssize_t length = 0;
+				fDataMessage->FindData(fFieldName, fFieldType, i, &ptr, &length);
+				unsigned char* buffer = new unsigned char[length];
+				memcpy(buffer, ptr, length);
+				time_t time = *(reinterpret_cast<time_t*>(buffer));
+				BDateTime datetime;
+				datetime.SetTime_t(time);
+
+				itemData
+						<< datetime.Date().Year() << "-"
+						<< (datetime.Date().Month() < 10 ? "0" : "")
+						<< datetime.Date().Month() << "-"
+						<< (datetime.Date().Day() < 10 ? "0" : "")
+						<< datetime.Date().Day() << " "
+						<< (datetime.Time().Hour() < 10 ? "0" : "")
+						<< datetime.Time().Hour() << ":"
+						<< (datetime.Time().Minute() < 10 ? "0" : "")
+						<< datetime.Time().Minute() << ":"
+						<< (datetime.Time().Second() < 10 ? "0" : "")
+						<< datetime.Time().Second();
+
+				delete[] buffer;
+				break;
+			}
+
 			case B_UINT8_TYPE:
 			{
 				itemData << fDataMessage->GetUInt8(fFieldName, i, 0);
@@ -396,6 +435,8 @@ DataView::SetTo(BMessage* data, BString name, type_code type, int32 count)
 		fDataView->AddRow(row);
 	}
 
+	DataAreaView()->ResizeAllColumnsToPreferred();
+
 	if(Window()->IsLocked())
 		UnlockLooper();
 	return B_OK;
@@ -428,7 +469,6 @@ DataView::MessageReceived(BMessage* msg)
 		}
 		case DV_ENTRY_INVOKED:
 		{
-			// fprintf(stdout, "Invoked\n");
 			BRow *selected_row = fDataView->CurrentSelection();
 			int32 field_index = static_cast<BIntegerField*>(selected_row->GetField(0))->Value();
 
@@ -465,20 +505,6 @@ DataView::MessageReceived(BMessage* msg)
 }
 
 void
-DataView::SetPanelMode(bool status)
-{
-	LockLooper();
-
-	if(status) {
-		fToolbar->FindButton(DV_CLOSE_VIEW_REQUESTED)->Show();
-	}
-	else
-		fToolbar->FindButton(DV_CLOSE_VIEW_REQUESTED)->Hide();
-
-	UnlockLooper();
-}
-
-void
 DataView::SetupControls()
 {
 	fDataLabel = new BStringView("datalabel", "");
@@ -497,14 +523,29 @@ DataView::SetupControls()
 	fDataView = new BColumnListView("dataview", 0);
 	fDataView->SetSelectionMessage(new BMessage(DV_ENTRY_SELECTED));
 	fDataView->SetInvocationMessage(new BMessage(DV_ENTRY_INVOKED));
-	fDataView->AddColumn(new BIntegerColumn(B_TRANSLATE("Index"), 70, 10, 100), 0);
-	fDataView->AddColumn(new BStringColumn(B_TRANSLATE("Value"), 200, 50, 1000, 0), 1);
+	fDataView->AddColumn(new BIntegerColumn(B_TRANSLATE("Index"), 70,
+		StringWidth(B_TRANSLATE("Index")) + be_control_look->DefaultLabelSpacing() * 2, 100), 0);
+	fDataView->AddColumn(new BStringColumn(B_TRANSLATE("Value"), 200,
+		StringWidth(B_TRANSLATE("Value")) + be_control_look->DefaultLabelSpacing() * 2, 1000, 0), 1);
 	fDataView->AddStatusView(fStatusView);
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL, 0)
 		.Add(fToolbar)
 		.Add(fDataView)
 	.Layout();
+}
+
+void
+DataView::SetLabel(const char* name, const char* typeString)
+{
+	BString label("");
+	if(name) {
+		label << name;
+		if(typeString) {
+			label << " (" << typeString << ")";
+		}
+	}
+	fDataLabel->SetText(label);
 }
 
 #undef B_TRANSLATION_CONTEXT
@@ -526,14 +567,12 @@ DataWindow::DataWindow(BRect frame,
 {
 	fDataView = new DataView(fDataMessage, fFieldName, fFieldType, fItemCount);
 
-	// fCloseButton = new BButton(B_TRANSLATE("Close"), new BMessage(DW_BUTTON_CLOSE));
-
 	BLayoutBuilder::Group<>(this, B_VERTICAL, B_USE_SMALL_SPACING)
 		.SetInsets(B_USE_SMALL_SPACING)
 		.Add(fDataView)
-		// .Add(fCloseButton)
 	.Layout();
 
+	AddShortcut('W', B_COMMAND_KEY, new BMessage(DW_BUTTON_CLOSE));
 }
 
 

@@ -18,6 +18,7 @@ SRCS = \
 	 src/importerwindow.cpp  \
 	 src/gettype.cpp  \
 	 src/visualwindow.cpp  \
+	 src/msginfowindow.cpp \
 
 RDEFS = \
 	 Kottan.rdef  \

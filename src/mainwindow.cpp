@@ -9,7 +9,6 @@
 #include "importerwindow.h"
 #include "kottandefs.h"
 #include "mainwindow.h"
-#include "whatwindow.h"
 
 #include <Alert.h>
 #include <FindDirectory.h>
@@ -54,6 +53,7 @@ MainWindow::MainWindow(BRect geometry)
             .AddItem(B_TRANSLATE("Add alignment" B_UTF8_ELLIPSIS), MW_ADD_ALIGNMENT)
             .AddItem(B_TRANSLATE("Add boolean" B_UTF8_ELLIPSIS), MW_ADD_BOOL)
             .AddItem(B_TRANSLATE("Add color" B_UTF8_ELLIPSIS), MW_ADD_COLOR)
+			.AddItem(B_TRANSLATE("Add date and time" B_UTF8_ELLIPSIS), MW_ADD_TIME)
             .AddMenu(B_TRANSLATE("Add integer number"))
                 .AddItem(B_TRANSLATE("Signed integer (8 bits)" B_UTF8_ELLIPSIS), MW_ADD_INT8)
                 .AddItem(B_TRANSLATE("Signed integer (16 bits)" B_UTF8_ELLIPSIS), MW_ADD_INT16)
@@ -103,7 +103,7 @@ MainWindow::MainWindow(BRect geometry)
 	fTopMenuBar->FindItem(MW_RELOAD_FROM_FILE)->SetEnabled(false);
 	fTopMenuBar->FindItem(MW_CLOSE_MESSAGEFILE)->SetEnabled(false);
 	fTopMenuBar->FindItem(MW_DATA_PANEL_VISIBLE)->SetMarked(!fDataView->IsHidden());
-	fTopMenuBar->FindItem(MW_MESSAGE_INFORMATION)->SetEnabled(false); // Not yet implemented
+	fTopMenuBar->FindItem(MW_MESSAGE_INFORMATION)->SetEnabled(false);
 
 	//define main layout
 	BLayoutBuilder::Group<>(this, B_VERTICAL,0)
@@ -238,6 +238,7 @@ MainWindow::MessageReceived(BMessage *msg)
 				fMessageInfoView->SetDataMessage(data_message);
 				fTopMenuBar->FindItem(MW_RELOAD_FROM_FILE)->SetEnabled(true);
 				fTopMenuBar->FindItem(MW_CLOSE_MESSAGEFILE)->SetEnabled(true);
+				fTopMenuBar->FindItem(MW_MESSAGE_INFORMATION)->SetEnabled(true);
 
 				// Set the window's title with the file path (if it was sent)
 				BString appTitle(kAppName), filePath;
@@ -275,6 +276,7 @@ MainWindow::MessageReceived(BMessage *msg)
 				fTopMenuBar->FindItem(MW_SAVE_MESSAGEFILE)->SetEnabled(false);
 				fTopMenuBar->FindItem(MW_RELOAD_FROM_FILE)->SetEnabled(false);
 				fTopMenuBar->FindItem(MW_CLOSE_MESSAGEFILE)->SetEnabled(false);
+				fTopMenuBar->FindItem(MW_MESSAGE_INFORMATION)->SetEnabled(false);
 			}
 			break;
 		}
@@ -310,7 +312,7 @@ MainWindow::MessageReceived(BMessage *msg)
 				int32 top_parent_index =
 									static_cast<BIntegerField*>(current_row->GetField(0))->Value();
 				selection_path_msg.AddInt32("selection_path",top_parent_index);
-
+				selection_path_msg.AddPointer("window", this);
 				be_app->PostMessage(&selection_path_msg);
 			}
 
@@ -346,6 +348,7 @@ MainWindow::MessageReceived(BMessage *msg)
 			}
 			else {
 				fDataView->Clear();
+				fDataView->SetLabel(((BStringField*)selectedRow->GetField(1))->String(), "B_MESSAGE_TYPE");
 			}
 			break;
 		}
@@ -362,7 +365,6 @@ MainWindow::MessageReceived(BMessage *msg)
 			BString filePath;
 			if(msg->FindString("filePath", &filePath) == B_OK) {
 				// Set the window's title with the file path
-				// fprintf(stderr, "Title is %s.\n", filePath.String());
 				BString appTitle(kAppName);
 				appTitle << ": " << filePath.String();
 				SetTitle(appTitle);
@@ -437,6 +439,7 @@ MainWindow::MessageReceived(BMessage *msg)
 		case MW_ADD_POINT:
 		case MW_ADD_SIZE:
 		case MW_ADD_RECT:
+		case MW_ADD_TIME:
 		{
 			BMessage editorData(MW_CREATE_ENTRY_REQUESTED);
 			editorData.AddBool("create", true);
@@ -465,6 +468,13 @@ MainWindow::MessageReceived(BMessage *msg)
 			break;
 		}
 
+		// Call to open message information dialog box
+		case MW_MESSAGE_INFORMATION:
+		{
+			be_app->PostMessage(msg);
+			break;
+		}
+
 		// Call to summon a EditWindow from the MainWindow-owned DataView
 		case DW_ROW_CLICKED:
 		{
@@ -482,7 +492,6 @@ MainWindow::MessageReceived(BMessage *msg)
 			if((new BAlert("", B_TRANSLATE("Do you want to remove this item?"),
 			B_TRANSLATE("Remove"), B_TRANSLATE("Keep")))->Go() == 0) {
 				be_app->PostMessage(msg);
-				// Quit();
 			}
 			break;
 		}

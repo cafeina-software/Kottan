@@ -25,7 +25,8 @@ enum
 {
 	EV_DATA_CHANGED='ev00',
 	EV_REF_REQUESTED,
-	EV_MEASUREMENT_REQUESTED
+	EV_MEASUREMENT_REQUESTED,
+	EV_GET_CURRENT_TIME
 };
 
 class PreviewableView : public BView
@@ -33,6 +34,8 @@ class PreviewableView : public BView
 public:
 	PreviewableView(BRect frame, BBitmap* bitmap);
 	virtual void Draw(BRect updateRect);
+			void BorrowBitmap(BBitmap* bitmap);
+			void ReturnBitmap();
 private:
 	void proportional_view(BRect viewRect, BRect imageRect, BRect* resultRect);
 private:
@@ -43,8 +46,11 @@ private:
 class EditView : public BView {
 public:
 						EditView(BMessage* msg, type_code type, const char* label, int32 index, bool = false);
+	virtual				~EditView();
+
 			bool 		IsEditable();
 			bool 		IsSaveable();
+			void		ValidateData();
 			status_t 	SaveData();
 			void		SetDataFor(type_code type, const void* data);
 	const	type_code	Type() const { return fDataType; }
@@ -74,6 +80,7 @@ private:
 	BSpinner			*fIntegerSpinner2;
 	BSpinner			*fIntegerSpinner3;
 	BSpinner			*fIntegerSpinner4;
+	BSpinner			*fIntegerSpinner5;
 	BDecimalSpinner		*fDecimalSpinner1;
 	BDecimalSpinner		*fDecimalSpinner2;
 	BDecimalSpinner		*fDecimalSpinner3;
@@ -87,6 +94,8 @@ private:
 	BTextControl		*fTextCtrl2;
 	BTextControl		*fTextCtrl3;
 	BTextControl		*fTextCtrl4;
+
+	BBitmap				*fPreviewableBitmap;
 };
 
 #endif

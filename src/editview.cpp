@@ -5,7 +5,6 @@
  */
 
 #include "editview.h"
-#include "kottandefs.h"
 #include <Box.h>
 #include <Button.h>
 #include <LayoutBuilder.h>
@@ -13,9 +12,11 @@
 #include <FilePanel.h>
 #include <Catalog.h>
 #include <Path.h>
+#include <ios>
 #include <private/interface/ColumnTypes.h>
 #include <IconUtils.h>
 #include <limits>
+#include <cctype>
 #include <cstdlib>
 #include <cstdio>
 
@@ -87,7 +88,20 @@ PreviewableView::Draw(BRect rect)
 	Invalidate();
 }
 
-void PreviewableView::proportional_view(BRect viewRect, BRect imageRect, BRect* resultRect)
+void
+PreviewableView::BorrowBitmap(BBitmap* bitmap)
+{
+	fBitmap = bitmap;
+}
+
+void
+PreviewableView::ReturnBitmap()
+{
+	fBitmap = NULL;
+}
+
+void
+PreviewableView::proportional_view(BRect viewRect, BRect imageRect, BRect* resultRect)
 {
     /* From LockWorkstation rework: resize image to bounds keeping proportions */
     float rx = (viewRect.Width() / imageRect.Width());
@@ -111,11 +125,15 @@ EditView::EditView(BMessage* msg, type_code type, const char* label, int32 index
 	fDataType(type),
 	fDataLabel(label),
 	fDataIndex(index),
-	fIsCreating(creating)
+	fIsCreating(creating),
+	fPreviewableBitmap(NULL)
 {
 	fDescFont = be_plain_font;
 	fDescFont.SetFace(B_ITALIC_FACE);
 	fDescColor = ui_color(B_WINDOW_INACTIVE_TEXT_COLOR);
+
+	if(!Window()->IsLocked())
+		LockLooper();
 
 	//create layout
 	fMainLayout = new BGroupLayout(B_VERTICAL);
@@ -132,6 +150,7 @@ EditView::EditView(BMessage* msg, type_code type, const char* label, int32 index
 	fIntegerSpinner2 = new BSpinner("","",new BMessage(EV_DATA_CHANGED));
 	fIntegerSpinner3 = new BSpinner("","",new BMessage(EV_DATA_CHANGED));
 	fIntegerSpinner4 = new BSpinner("","",new BMessage(EV_DATA_CHANGED));
+	fIntegerSpinner5 = new BSpinner("","",new BMessage(EV_DATA_CHANGED));
 	fDecimalSpinner1 = new BDecimalSpinner("","",new BMessage(EV_DATA_CHANGED));
 	fDecimalSpinner2 = new BDecimalSpinner("","",new BMessage(EV_DATA_CHANGED));
 	fDecimalSpinner3 = new BDecimalSpinner("","",new BMessage(EV_DATA_CHANGED));
@@ -155,6 +174,15 @@ EditView::EditView(BMessage* msg, type_code type, const char* label, int32 index
 	// Configure controls
 	SetupControls(); // Add the controls needed to the layout
 	InitControlsData(); // Fill the controls for the specified data type with values
+
+	if(Window()->IsLocked())
+		UnlockLooper();
+}
+
+EditView::~EditView()
+{
+	if(fPreviewableBitmap)
+		delete fPreviewableBitmap;
 }
 
 bool
@@ -184,6 +212,18 @@ EditView::SetDataFor(type_code type, const void* data)
 			BEntry(ref).GetNodeRef(&nref);
 			BString dev_t_data = BString().SetToFormat("%" B_PRIdDEV, nref.device);
 			BString ino_t_data = BString().SetToFormat("%" B_PRIdINO, nref.node);
+
+			if(fIsCreating) { // Pre create the rows when in creation mode
+				BRow* deviceRow = new BRow();
+				deviceRow->SetField(new BStringField(B_TRANSLATE("Device")), 0);
+				deviceRow->SetField(new BStringField(BString().SetToFormat("%" B_PRIdDEV, nref.device)), 1);
+				fDataViewer->AddRow(deviceRow);
+
+				BRow* nodeRow = new BRow();
+				nodeRow->SetField(new BStringField(B_TRANSLATE("Node")), 0);
+				nodeRow->SetField(new BStringField(BString().SetToFormat("%" B_PRIdINO, nref.node)), 1);
+				fDataViewer->AddRow(nodeRow);
+			}
 
 			((BStringField*)fDataViewer->RowAt(rowIndex(fDataViewer, 0,
 				B_TRANSLATE("Device")))->GetField(1))->SetString(dev_t_data);
@@ -225,6 +265,24 @@ EditView::SetDataFor(type_code type, const void* data)
 			BPath path;
 			entry.GetPath(&path);
 
+			if(fIsCreating) { // Pre create the rows when in creation mode
+				BRow* deviceRow = new BRow();
+				deviceRow->SetField(new BStringField(B_TRANSLATE("Device")), 0);
+				deviceRow->SetField(new BStringField(""), 1);
+				fDataViewer->AddRow(deviceRow);
+
+				BRow* directoryRow = new BRow();
+				directoryRow->SetField(new BStringField(B_TRANSLATE("Directory")), 0);
+				directoryRow->SetField(new BStringField(""), 1);
+				fDataViewer->AddRow(directoryRow);
+
+				BRow* nameRow = new BRow();
+				nameRow->SetField(new BStringField(B_TRANSLATE("Name")), 0);
+				nameRow->SetField(new BStringField(""), 1);
+				fDataViewer->AddRow(nameRow);
+			}
+
+
 			((BStringField*)fDataViewer->RowAt(rowIndex(fDataViewer, 0,
 				B_TRANSLATE("Device")))->GetField(1))->SetString(dev_t_data);
 			((BStringField*)fDataViewer->RowAt(rowIndex(fDataViewer, 0,
@@ -248,6 +306,23 @@ EditView::SetDataFor(type_code type, const void* data)
 			break;
 		}
 
+		case B_TIME_TYPE:
+		{
+			const time_t* time = static_cast<const time_t*>(data);
+			BDateTime datetime;
+			datetime.SetTime_t(*time);
+
+			fTextCtrl1->SetText(BString().SetToFormat("%d", datetime.Date().Year()));
+			fIntegerSpinner2->SetValue(datetime.Date().Month());
+			fIntegerSpinner1->SetValue(datetime.Date().Day());
+
+			fIntegerSpinner3->SetValue(datetime.Time().Hour());
+			fIntegerSpinner4->SetValue(datetime.Time().Minute());
+			fIntegerSpinner5->SetValue(datetime.Time().Second());
+
+			Window()->PostMessage(EV_DATA_CHANGED);
+			break;
+		}
 	}
 }
 
@@ -337,6 +412,18 @@ EditView::SaveData()
 				fDataMessage->AddBool(fTextCtrlName->Text(), isTrue);
 			else
 				fDataMessage->ReplaceBool(fDataLabel, fDataIndex, isTrue);
+			break;
+		}
+
+		case B_CHAR_TYPE:
+		{
+			char c = static_cast<char>(fIntegerSpinner1->Value());
+			if(fIsCreating)
+				fDataMessage->AddData(fTextCtrlName->Text(), B_CHAR_TYPE,
+					&c, sizeof(c));
+			else
+				fDataMessage->ReplaceData(fDataLabel, B_CHAR_TYPE, fDataIndex,
+					&c, sizeof(c));
 			break;
 		}
 
@@ -484,6 +571,23 @@ EditView::SaveData()
 			break;
 		}
 
+		case B_TIME_TYPE:
+		{
+			int32 year = atoi(fTextCtrl1->Text());
+			BDate date(year, fIntegerSpinner2->Value(), fIntegerSpinner1->Value());
+			BTime time(fIntegerSpinner3->Value(), fIntegerSpinner4->Value(), fIntegerSpinner5->Value());
+			BDateTime datetime(date, time);
+			time_t unixtime = datetime.Time_t();
+
+			if(fIsCreating)
+				fDataMessage->AddData(fTextCtrlName->Text(), B_TIME_TYPE,
+					&unixtime, sizeof(unixtime));
+			else
+				fDataMessage->ReplaceData(fDataLabel, B_TIME_TYPE, &unixtime,
+					sizeof(unixtime));
+			break;
+		}
+
 		default:
 			return B_BAD_DATA;
 	}
@@ -601,6 +705,18 @@ EditView::SetupControls()
 			.End();
 
 			fMainLayout->AddView(view);
+			break;
+		}
+
+		case B_CHAR_TYPE:
+		{
+			auto range_min = std::numeric_limits<char>::lowest();
+			auto range_max = std::numeric_limits<char>::max();
+
+			fIntegerSpinner1->SetRange(range_min, range_max);
+
+			fMainLayout->AddView(fIntegerSpinner1);
+			fMainLayout->AddView(fSvDescription);
 			break;
 		}
 
@@ -878,18 +994,50 @@ EditView::SetupControls()
 			break;
 		}
 
-		// case B_TIME_TYPE:
-			// break;
+		case B_TIME_TYPE:
+		{
+			fIntegerSpinner1->SetLabel(B_TRANSLATE("DD"));
+			fIntegerSpinner1->SetRange(1, 31);
+			fIntegerSpinner2->SetLabel(B_TRANSLATE("MM"));
+			fIntegerSpinner2->SetRange(1, 12);
+			fTextCtrl1->SetLabel(B_TRANSLATE("YYYY"));
+			for(int c = 0; c < 256; c++) {
+				if(!(c >= '0' && c <= '9'))
+					fTextCtrl1->TextView()->DisallowChar(c);
+			}
+			fIntegerSpinner3->SetLabel(B_TRANSLATE("HH"));
+			fIntegerSpinner3->SetRange(0, 23);
+			fIntegerSpinner4->SetLabel(B_TRANSLATE("MM"));
+			fIntegerSpinner4->SetRange(0, 59);
+			fIntegerSpinner5->SetLabel(B_TRANSLATE("SS"));
+			fIntegerSpinner5->SetRange(0, 59);
+
+			BView* timeContainerView = new BView(NULL, B_SUPPORTS_LAYOUT);
+			BLayoutBuilder::Grid<>(timeContainerView)
+				.Add(fTextCtrl1, 2, 0) /* year */
+				.Add(fIntegerSpinner2, 1, 0) /* month */
+				.Add(fIntegerSpinner1, 0, 0) /* day */
+				.Add(fIntegerSpinner3, 0, 1) /* hour */
+				.Add(fIntegerSpinner4, 1, 1) /* minute */
+				.Add(fIntegerSpinner5, 2, 1) /* second */
+			.End();
+			fMainLayout->AddView(timeContainerView);
+
+			fReusableButton1->SetLabel(B_TRANSLATE("Use current date and time"));
+			fReusableButton1->SetMessage(new BMessage(EV_GET_CURRENT_TIME));
+			fMainLayout->AddView(fReusableButton1);
+			break;
+		}
 
 		/* Non editable data below */
 		case B_VECTOR_ICON_TYPE:
 		{
-			BBitmap* bitmap = new BBitmap(BRect(0, 0, 64, 64), B_RGBA32);
+			fPreviewableBitmap = new BBitmap(BRect(0, 0, 300, 300), B_RGBA32);
 			const void* data = NULL;
 			ssize_t length = 0;
 			fDataMessage->FindData(fDataLabel, B_VECTOR_ICON_TYPE, fDataIndex, &data, &length);
-			BIconUtils::GetVectorIcon(static_cast<const uint8*>(data), length, bitmap);
-			PreviewableView* bitmapView = new PreviewableView(BRect(0, 0, 127, 127), bitmap);
+			BIconUtils::GetVectorIcon(static_cast<const uint8*>(data), length, fPreviewableBitmap);
+			PreviewableView* bitmapView = new PreviewableView(BRect(0, 0, 127, 127), fPreviewableBitmap);
 			fSvDescription->SetText(B_TRANSLATE("Preview:"));
 			not_editable_text->SetFont(&fDescFont);
 			not_editable_text->SetHighColor(fDescColor);
@@ -994,6 +1142,21 @@ EditView::InitControlsData()
 					fRadioButton1->SetValue(B_CONTROL_ON);
 				else
 					fRadioButton2->SetValue(B_CONTROL_ON);
+				break;
+			}
+			case B_CHAR_TYPE:
+			{
+				char c;
+				const void* ptr = NULL;
+				ssize_t length = 0;
+				fDataMessage->FindData(fDataLabel, B_CHAR_TYPE, fDataIndex, &ptr, &length);
+				c = *(static_cast<const unsigned char*>(ptr));
+				fIntegerSpinner1->SetValue(static_cast<int32>(c));
+
+				BString description;
+				if(isprint(static_cast<char>(c)) != 0)
+					description << B_TRANSLATE("Character: ") << c;
+				fSvDescription->SetText(description);
 				break;
 			}
 			case B_DOUBLE_TYPE:
@@ -1149,8 +1312,27 @@ EditView::InitControlsData()
 				fTextCtrl1->SetText(data_string);
 				break;
 			}
-			// case B_TIME_TYPE:
-				// break;
+			case B_TIME_TYPE:
+			{
+				const void* ptr = NULL;
+				ssize_t length = 0;
+				fDataMessage->FindData(fDataLabel, fDataType, fDataIndex, &ptr, &length);
+				unsigned char* buffer = new unsigned char[length];
+				memcpy(buffer, ptr, length);
+				time_t time = *(reinterpret_cast<time_t*>(buffer));
+				BDateTime datetime;
+				datetime.SetTime_t(time);
+
+				fIntegerSpinner1->SetValue(datetime.Date().Day());
+				fIntegerSpinner2->SetValue(datetime.Date().Month());
+				fTextCtrl1->SetText(BString().SetToFormat("%d", datetime.Date().Year()));
+				fIntegerSpinner3->SetValue(datetime.Time().Hour());
+				fIntegerSpinner4->SetValue(datetime.Time().Minute());
+				fIntegerSpinner5->SetValue(datetime.Time().Second());
+
+				delete[] buffer;
+				break;
+			}
 			case B_UINT8_TYPE:
 			{
 				uint8 data_uint8 = 0;
@@ -1177,3 +1359,61 @@ EditView::InitControlsData()
 		}
 	}
 }
+
+void
+EditView::ValidateData()
+{
+	switch(fDataType)
+	{
+		case B_CHAR_TYPE:
+		{
+			char c = static_cast<char>(fIntegerSpinner1->Value());
+
+			BString description;
+			if(isprint(static_cast<char>(c)) != 0)
+				description << B_TRANSLATE("Character: ") << c;
+			else
+				description.SetTo(B_TRANSLATE("Not previewable character"));
+
+			fSvDescription->SetText(description);
+			break;
+		}
+		case B_TIME_TYPE:
+		{
+			switch(fIntegerSpinner2->Value())
+			{
+				case 1:
+				case 3:
+				case 5:
+				case 7:
+				case 8:
+				case 10:
+				case 12:
+					fIntegerSpinner1->SetMaxValue(31);
+					break;
+				case 4:
+				case 6:
+				case 9:
+				case 11:
+					fIntegerSpinner1->SetMaxValue(30);
+					break;
+				case 2:
+				{
+					int32 year = atoi(fTextCtrl1->Text());
+					bool isLeap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+					fIntegerSpinner1->SetMaxValue(isLeap ? 29 : 28);
+					break;
+				}
+				default:
+					break;
+			}
+
+			if(fIntegerSpinner1->Value() > fIntegerSpinner1->MaxValue())
+				fIntegerSpinner1->SetValue(fIntegerSpinner1->MaxValue());
+			break;
+		default:
+			break;
+		}
+	}
+}
+

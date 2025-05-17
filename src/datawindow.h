@@ -41,10 +41,10 @@ public:
 	virtual	void		AttachedToWindow();
 	virtual	void		MessageReceived(BMessage*);
 
-			void		SetPanelMode(bool);
-
 			BToolBar*	TitleBarView() { return fToolbar; }
 	BColumnListView*	DataAreaView() { return fDataView; }
+
+			void		SetLabel(const char* name, const char* typeString);
 private:
 			void		SetupControls();
 private:

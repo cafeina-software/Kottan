@@ -3,8 +3,8 @@
  * All rights reserved. Distributed under the terms of the MIT license.
  *
  */
-#ifndef __DUMMY_WINDOW_H__
-#define __DUMMY_WINDOW_H__
+#ifndef __VISUAL_WINDOW_H__
+#define __VISUAL_WINDOW_H__
 
 #include <Window.h>
 
@@ -60,4 +60,4 @@ private:
 	VisualView*      fClientView;
 };
 
-#endif /* __DUMMY_WINDOW_H__ */
+#endif /* __VISUAL_WINDOW_H__ */
