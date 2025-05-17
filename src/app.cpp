@@ -51,6 +51,7 @@ App::App()
 	BEntry userDirectoryEntry(userDirectoryPath.Path());
 	entry_ref userDirectoryRef;
 	userDirectoryEntry.GetRef(&userDirectoryRef);
+	fGenericFilter = new GenericFileFilter;
 	fMessageFilter = new MessageFileFilter;
 	fOpenPanel = new BFilePanel(B_OPEN_PANEL, NULL, &userDirectoryRef, B_FILE_NODE, false, NULL, NULL);
 	fSavePanel = new BFilePanel(B_SAVE_PANEL, NULL, &userDirectoryRef, B_FILE_NODE, false, NULL, NULL);
@@ -73,6 +74,7 @@ App::~App()
 	delete fMessageFile;
 	delete fOpenPanel;
 	delete fSavePanel;
+	delete fGenericFilter;
 	delete fMessageFilter;
 
 	FreeSharedResources();
@@ -520,7 +522,7 @@ App::MessageReceived(BMessage *msg)
 		{
 			BMessenger messenger;
 			msg->FindMessenger(KottanFieldMsgr, &messenger);
-			ShowFilePanel(fOpenPanel, &messenger, new BMessage(EW_REFS_RECEIVED), NULL);
+			ShowFilePanel(fOpenPanel, &messenger, new BMessage(EW_REFS_RECEIVED), fGenericFilter);
 			break;
 		}
 

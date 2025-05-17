@@ -30,6 +30,14 @@ public:
 	const char  *field_name;
 };
 
+class GenericFileFilter : public BRefFilter
+{
+public:
+	virtual bool Filter(const entry_ref*, BNode*, struct stat_beos*, const char*) {
+		return true;
+	}
+};
+
 class MessageFileFilter : public BRefFilter
 {
 public:
@@ -89,6 +97,8 @@ private:
 		BFile						*fMessageFile;
 		entry_ref					fMessageFileRef;
 		BString						fSettingsFileName;
+
+		GenericFileFilter			*fGenericFilter;
 		MessageFileFilter			*fMessageFilter;
 
 		const char 					*fSelectedName;
